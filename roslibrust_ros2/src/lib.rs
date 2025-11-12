@@ -312,6 +312,7 @@ mod tests {
             .unwrap();
 
             pub_cmd.kill().unwrap();
+            pub_cmd.wait().unwrap();
         }
 
         #[tokio::test(flavor = "multi_thread")]
@@ -389,7 +390,8 @@ mod tests {
             // If we reach here, state was changed to true by the service call!
 
             // Protection to make sure we don't leave a ros2 service call running
-            srv_call_cmd.kill().unwrap()
+            srv_call_cmd.kill().unwrap();
+            srv_call_cmd.wait().unwrap();
         }
 
         #[tokio::test(flavor = "multi_thread")]
@@ -429,11 +431,11 @@ mod tests {
                 .expect("Service call should succeed");
 
             // Verify the response
-            assert_eq!(response.success, true);
+            assert!(response.success);
             assert_eq!(response.message, "You set my bool!");
 
             // Verify the server state was updated
-            assert_eq!(state.load(std::sync::atomic::Ordering::SeqCst), true);
+            assert!(state.load(std::sync::atomic::Ordering::SeqCst));
         }
     }
 }

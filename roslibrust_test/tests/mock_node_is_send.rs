@@ -8,10 +8,10 @@ use roslibrust_test::ros1::*;
 
 // Very basic node that holds a bunch of ros types generically
 struct Node<T: Ros> {
-    ros: T,
+    _ros: T,
     publisher: T::Publisher<std_msgs::String>,
     subscriber: T::Subscriber<std_msgs::String>,
-    service: T::ServiceServer,
+    _service: T::ServiceServer,
     client: T::ServiceClient<std_srvs::SetBool>,
 }
 
@@ -40,10 +40,10 @@ impl<T: Ros> Node<T> {
             .await
             .unwrap();
         Self {
-            ros,
+            _ros: ros,
             publisher,
             subscriber,
-            service,
+            _service: service,
             client,
         }
     }

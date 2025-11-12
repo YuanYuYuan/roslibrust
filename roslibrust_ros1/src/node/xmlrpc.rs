@@ -44,7 +44,7 @@ impl XmlRpcServerHandle {
 }
 
 impl XmlRpcServer {
-    pub fn new(
+    pub fn create(
         host_addr: Ipv4Addr,
         node_server: NodeServerHandle,
     ) -> Result<XmlRpcServerHandle, XmlRpcError> {
@@ -58,7 +58,7 @@ impl XmlRpcServer {
             }
         });
         let host_addr = SocketAddr::from((host_addr, 0));
-        let server = hyper::server::Server::try_bind(&host_addr.into())?;
+        let server = hyper::server::Server::try_bind(&host_addr)?;
         let server = server.serve(make_svc);
         let addr = server.local_addr();
 
@@ -111,7 +111,7 @@ impl XmlRpcServer {
             "getMasterUri" => {
                 debug!("getMasterUri called by {args:?}");
                 match node_server.get_master_uri().await {
-                    Ok(uri) => Self::to_response(uri),
+                    Ok(uri) => Self::to_response(uri).map_err(|e| *e),
                     Err(e) => Err(Self::make_error_response(
                         e,
                         "Unable to retrieve master URI",
@@ -126,14 +126,14 @@ impl XmlRpcServer {
                     Self::make_error_response(e,
                          "Operation system returned a PID which does not fit into i32, and therefor cannot be sent via xmlrpc",
                          StatusCode::INTERNAL_SERVER_ERROR)})?;
-                Self::to_response(pid)
+                Self::to_response(pid).map_err(|e| *e)
             }
             "getSubscriptions" => {
                 debug!("getSubscriptions called by {args:?}");
                 match node_server.get_subscriptions().await {
                     Ok(subs) => {
                         match serde_xmlrpc::to_value(subs) {
-                            Ok(subs) => Self::to_response(subs),
+                            Ok(subs) => Self::to_response(subs).map_err(|e| *e),
                             Err(e) => Err(Self::make_error_response(
                                 e,
                                 "Subscriptions contained names which could not be validly serialized to xmlrpc",
@@ -147,7 +147,7 @@ impl XmlRpcServer {
                 debug!("getPublications called by {args:?}");
                 match node_server.get_publications().await {
                     Ok(pubs) => match serde_xmlrpc::to_value(pubs) {
-                        Ok(pubs) => Self::to_response(pubs),
+                        Ok(pubs) => Self::to_response(pubs).map_err(|e| *e),
                         Err(e) => Err(Self::make_error_response(
                             e,
                             "Publications contained names which could not be validly serialized to xmlrpc",
@@ -182,7 +182,7 @@ impl XmlRpcServer {
                     })?;
 
                 // ROS's API is for us to still return an int, but the value is literally named "ignore"...
-                Self::to_response(0)
+                Self::to_response(0).map_err(|e| *e)
             }
             "requestTopic" => {
                 debug!("requestTopic called by {args:?}");
@@ -236,16 +236,16 @@ impl XmlRpcServer {
                     )
                 })?;
 
-                Self::to_response(0)
+                Self::to_response(0).map_err(|e| *e)
             }
             // getBusStats, getBusInfo <= have decided not to impl these
             _ => {
                 let error_str = format!("Client attempted call function {method_name} which is not implemented by the Node's xmlrpc server.");
                 warn!("{error_str}");
-                return Ok(Response::builder()
+                Ok(Response::builder()
                     .status(StatusCode::NOT_IMPLEMENTED)
                     .body(Body::from(error_str))
-                    .unwrap());
+                    .unwrap())
             }
         }
     }
@@ -276,7 +276,9 @@ impl XmlRpcServer {
     }
 
     // Helper function for converting serde_xmlrpc stuff into responses
-    fn to_response(v: impl Into<serde_xmlrpc::Value>) -> Result<Response<Body>, Response<Body>> {
+    fn to_response(
+        v: impl Into<serde_xmlrpc::Value>,
+    ) -> Result<Response<Body>, Box<Response<Body>>> {
         serde_xmlrpc::response_to_string(
             vec![serde_xmlrpc::Value::Array(vec![
                 1.into(),
@@ -286,11 +288,11 @@ impl XmlRpcServer {
             .into_iter(),
         )
         .map_err(|e| {
-            Self::make_error_response(
+            Box::new(Self::make_error_response(
                 e,
                 "Failed to serialize response data into valid xml",
                 StatusCode::INTERNAL_SERVER_ERROR,
-            )
+            ))
         })
         .map(|body| {
             Response::builder()

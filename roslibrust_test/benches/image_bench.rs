@@ -68,9 +68,9 @@ fn criterion_benchmark(c: &mut Criterion) {
     });
 
     c.bench_function("image_bench", |b| {
-        b.to_async(&runtime).iter(|| async {
+        b.to_async(&runtime).iter(|| {
             let mut context = context.lock().unwrap();
-            bench_iteration(&mut context).await
+            async move { bench_iteration(&mut context).await }
         })
     });
 }

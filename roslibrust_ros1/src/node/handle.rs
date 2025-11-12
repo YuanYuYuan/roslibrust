@@ -25,7 +25,7 @@ impl NodeHandle {
         let name = if name.starts_with("/") {
             Name::new(name)?
         } else {
-            Name::new(&format!("/{}", name))?
+            Name::new(format!("/{}", name))?
         };
 
         // Extra safety check that our name resolves now
@@ -34,7 +34,7 @@ impl NodeHandle {
         // Follow ROS rules and determine our IP and hostname
         let (addr, hostname) = super::determine_addr().await?;
 
-        let node = Node::new(master_uri, &hostname, &name, addr).await?;
+        let node = Node::create(master_uri, &hostname, &name, addr).await?;
         let nh = NodeHandle { inner: node };
 
         Ok(nh)
@@ -154,8 +154,7 @@ impl NodeHandle {
         F: ServiceFn<T>,
     {
         let service_name = Name::new(service_name)?;
-        let _response = self
-            .inner
+        self.inner
             .register_service_server::<T, F>(&service_name, server)
             .await?;
         // Super important. Don't clone self or we create a STRONG NodeHandle that keeps the node alive

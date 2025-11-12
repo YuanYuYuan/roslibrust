@@ -19,21 +19,6 @@ mod integration_tests {
     const TIMEOUT: Duration = Duration::from_millis(500);
     const LOCAL_WS: &str = "ws://localhost:9090";
 
-    #[cfg(feature = "ros1_test")]
-    use roslibrust_test::ros1::*;
-
-    #[cfg(feature = "ros2_test")]
-    use roslibrust_test::ros2::*;
-    // This replaces the fact that Time.msg is no longer in std_msgs in ROS2
-    #[cfg(feature = "ros2_test")]
-    use roslibrust_codegen::integral_types::Time;
-
-    use std_msgs::*;
-    // Warning is here because a test is being skipped in ros2_test
-    // this can be removed when we get self_service_call working
-    #[allow(unused_imports)]
-    use std_srvs::*;
-
     /**
     This test does a round trip publish subscribe for real
     Requires a running local rosbridge
@@ -48,28 +33,53 @@ mod integration_tests {
             .expect("Failed to create client in time")
             .unwrap();
 
-        timeout(TIMEOUT, client.advertise::<Header>(TOPIC))
-            .await
-            .expect("Failed to advertise in time")
-            .unwrap();
-        let rx = timeout(TIMEOUT, client.subscribe::<Header>(TOPIC))
-            .await
-            .expect("Failed to subscribe in time")
-            .unwrap();
+        #[cfg(feature = "ros1_test")]
+        timeout(
+            TIMEOUT,
+            client.advertise::<roslibrust_test::ros1::std_msgs::Header>(TOPIC),
+        )
+        .await
+        .expect("Failed to advertise in time")
+        .unwrap();
+        #[cfg(feature = "ros2_test")]
+        timeout(
+            TIMEOUT,
+            client.advertise::<roslibrust_test::ros2::std_msgs::Header>(TOPIC),
+        )
+        .await
+        .expect("Failed to advertise in time")
+        .unwrap();
+
+        #[cfg(feature = "ros1_test")]
+        let rx = timeout(
+            TIMEOUT,
+            client.subscribe::<roslibrust_test::ros1::std_msgs::Header>(TOPIC),
+        )
+        .await
+        .expect("Failed to subscribe in time")
+        .unwrap();
+        #[cfg(feature = "ros2_test")]
+        let rx = timeout(
+            TIMEOUT,
+            client.subscribe::<roslibrust_test::ros2::std_msgs::Header>(TOPIC),
+        )
+        .await
+        .expect("Failed to subscribe in time")
+        .unwrap();
 
         // Delay here to allow subscribe to complete before publishing
         // Test is flaky without it
         tokio::time::sleep(TIMEOUT).await;
 
         #[cfg(feature = "ros1_test")]
-        let msg_out = Header {
+        let msg_out = roslibrust_test::ros1::std_msgs::Header {
             seq: 666,
             stamp: Default::default(),
             frame_id: "self_publish".to_string(),
         };
 
         #[cfg(feature = "ros2_test")]
-        let msg_out = Header {
+        let msg_out = roslibrust_test::ros2::std_msgs::Header {
             stamp: Default::default(),
             frame_id: "self_publish".to_string(),
         };
@@ -95,19 +105,38 @@ mod integration_tests {
             ClientHandle::new_with_options(ClientHandleOptions::new(LOCAL_WS).timeout(TIMEOUT))
                 .await?;
 
-        let publisher = client.advertise::<Time>("/bad_message_recv/topic").await?;
+        #[cfg(feature = "ros1_test")]
+        let publisher = client
+            .advertise::<roslibrust_test::ros1::std_msgs::Time>("/bad_message_recv/topic")
+            .await?;
+        #[cfg(feature = "ros2_test")]
+        let publisher = client
+            .advertise::<roslibrust_test::ros2::builtin_interfaces::Time>(
+                "/bad_message_recv/topic",
+            )
+            .await?;
 
-        let sub: Subscriber<Header> = client.subscribe("/bad_message_recv/topic").await?;
+        #[cfg(feature = "ros1_test")]
+        let sub: Subscriber<roslibrust_test::ros1::std_msgs::Header> =
+            client.subscribe("/bad_message_recv/topic").await?;
+        #[cfg(feature = "ros2_test")]
+        let sub: Subscriber<roslibrust_test::ros2::std_msgs::Header> =
+            client.subscribe("/bad_message_recv/topic").await?;
 
         #[cfg(feature = "ros1_test")]
         publisher
-            .publish(&Time {
+            .publish(&roslibrust_test::ros1::std_msgs::Time {
                 data: roslibrust_codegen::Time { secs: 0, nsecs: 0 },
             })
             .await?;
 
         #[cfg(feature = "ros2_test")]
-        publisher.publish(&Time { secs: 0, nsecs: 0 }).await?;
+        publisher
+            .publish(&roslibrust_test::ros2::builtin_interfaces::Time {
+                sec: 0,
+                nanosec: 0,
+            })
+            .await?;
 
         match timeout(TIMEOUT, sub.next()).await {
             Err(_elapsed) => {
@@ -149,15 +178,27 @@ mod integration_tests {
 
         let client_1 = client.clone();
         tokio::task::spawn(async move {
+            #[cfg(feature = "ros1_test")]
             let _ = client_1
-                .advertise::<Header>("parrallel_1")
+                .advertise::<roslibrust_test::ros1::std_msgs::Header>("parrallel_1")
+                .await
+                .expect("Failed to advertise _1");
+            #[cfg(feature = "ros2_test")]
+            let _ = client_1
+                .advertise::<roslibrust_test::ros2::std_msgs::Header>("parrallel_1")
                 .await
                 .expect("Failed to advertise _1");
         });
 
         tokio::task::spawn(async move {
+            #[cfg(feature = "ros1_test")]
             let _ = client
-                .subscribe::<Header>("parrallel_1")
+                .subscribe::<roslibrust_test::ros1::std_msgs::Header>("parrallel_1")
+                .await
+                .expect("Failed to subscribe _1");
+            #[cfg(feature = "ros2_test")]
+            let _ = client
+                .subscribe::<roslibrust_test::ros2::std_msgs::Header>("parrallel_1")
                 .await
                 .expect("Failed to subscribe _1");
         });
@@ -183,10 +224,20 @@ mod integration_tests {
         let publisher = client.advertise(TOPIC).await?;
         debug!("Got publisher");
 
-        let sub = client.subscribe::<Header>(TOPIC).await?;
+        #[cfg(feature = "ros1_test")]
+        let sub = client
+            .subscribe::<roslibrust_test::ros1::std_msgs::Header>(TOPIC)
+            .await?;
+        #[cfg(feature = "ros2_test")]
+        let sub = client
+            .subscribe::<roslibrust_test::ros2::std_msgs::Header>(TOPIC)
+            .await?;
         debug!("Got subscriber");
 
-        let msg = Header::default();
+        #[cfg(feature = "ros1_test")]
+        let msg = roslibrust_test::ros1::std_msgs::Header::default();
+        #[cfg(feature = "ros2_test")]
+        let msg = roslibrust_test::ros2::std_msgs::Header::default();
         publisher.publish(&msg).await?;
         timeout(TIMEOUT, sub.next()).await?;
 
@@ -199,9 +250,19 @@ mod integration_tests {
         // Wait for drop to complete
         tokio::time::sleep(TIMEOUT).await;
 
-        let sub = client.subscribe::<Header>(TOPIC).await?;
+        #[cfg(feature = "ros1_test")]
+        let sub = client
+            .subscribe::<roslibrust_test::ros1::std_msgs::Header>(TOPIC)
+            .await?;
+        #[cfg(feature = "ros2_test")]
+        let sub = client
+            .subscribe::<roslibrust_test::ros2::std_msgs::Header>(TOPIC)
+            .await?;
         // manually publishing using private api
-        let msg = Header::default();
+        #[cfg(feature = "ros1_test")]
+        let msg = roslibrust_test::ros1::std_msgs::Header::default();
+        #[cfg(feature = "ros2_test")]
+        let msg = roslibrust_test::ros2::std_msgs::Header::default();
         client.publish(TOPIC, &msg).await?;
 
         match timeout(TIMEOUT, sub.next()).await {
@@ -224,8 +285,8 @@ mod integration_tests {
         let opt = ClientHandleOptions::new(LOCAL_WS).timeout(TIMEOUT);
         let client = ClientHandle::new_with_options(opt).await?;
 
-        let cb = |_req: SetBoolRequest| {
-            Ok(SetBoolResponse {
+        let cb = |_req: roslibrust_test::ros1::std_srvs::SetBoolRequest| {
+            Ok(roslibrust_test::ros1::std_srvs::SetBoolResponse {
                 success: true,
                 message: "call_success".to_string(),
             })
@@ -234,7 +295,7 @@ mod integration_tests {
         let topic = "/self_service_call";
 
         let handle = client
-            .advertise_service::<SetBool, _>(topic, cb)
+            .advertise_service::<roslibrust_test::ros1::std_srvs::SetBool, _>(topic, cb)
             .await
             .expect("Failed to advertise service");
 
@@ -242,7 +303,10 @@ mod integration_tests {
         tokio::time::sleep(TIMEOUT).await;
 
         let response = client
-            .call_service::<SetBool>(topic, SetBoolRequest { data: true })
+            .call_service::<roslibrust_test::ros1::std_srvs::SetBool>(
+                topic,
+                roslibrust_test::ros1::std_srvs::SetBoolRequest { data: true },
+            )
             .await
             .expect("Failed to call service");
         assert_eq!(response.message, "call_success");
@@ -255,7 +319,10 @@ mod integration_tests {
 
         // Should now fail to get a response after the handle is dropped
         let response = client
-            .call_service::<SetBool>(topic, SetBoolRequest { data: true })
+            .call_service::<roslibrust_test::ros1::std_srvs::SetBool>(
+                topic,
+                roslibrust_test::ros1::std_srvs::SetBoolRequest { data: true },
+            )
             .await;
         assert!(response.is_err());
 
@@ -301,7 +368,16 @@ mod integration_tests {
             .is_disconnected
             .store(true, std::sync::atomic::Ordering::Relaxed);
 
-        let res = client.advertise::<Time>("/bad_message_recv/topic").await;
+        #[cfg(feature = "ros1_test")]
+        let res = client
+            .advertise::<roslibrust_test::ros1::std_msgs::Time>("/bad_message_recv/topic")
+            .await;
+        #[cfg(feature = "ros2_test")]
+        let res = client
+            .advertise::<roslibrust_test::ros2::builtin_interfaces::Time>(
+                "/bad_message_recv/topic",
+            )
+            .await;
         assert!(matches!(res, Err(Error::Disconnected)));
 
         Ok(())
@@ -317,11 +393,24 @@ mod integration_tests {
         // Unclear if this is our fault or rosbridge's
         let publisher = client.advertise("/char_topic").await?;
         tokio::time::sleep(TIMEOUT).await;
-        let subscriber = client.subscribe::<std_msgs::Char>("/char_topic").await?;
+
+        #[cfg(feature = "ros1_test")]
+        let subscriber = client
+            .subscribe::<roslibrust_test::ros1::std_msgs::Char>("/char_topic")
+            .await?;
+        #[cfg(feature = "ros2_test")]
+        let subscriber = client
+            .subscribe::<roslibrust_test::ros2::std_msgs::Char>("/char_topic")
+            .await?;
         tokio::time::sleep(TIMEOUT).await;
 
         // Note because C++ char != rust char some care has to be taken when converting
-        let x = std_msgs::Char {
+        #[cfg(feature = "ros1_test")]
+        let x = roslibrust_test::ros1::std_msgs::Char {
+            data: 'x'.try_into().unwrap(),
+        };
+        #[cfg(feature = "ros2_test")]
+        let x = roslibrust_test::ros2::std_msgs::Char {
             data: 'x'.try_into().unwrap(),
         };
         publisher.publish(&x).await?;
@@ -347,10 +436,22 @@ mod integration_tests {
             ClientHandle::new_with_options(ClientHandleOptions::new(LOCAL_WS).timeout(TIMEOUT))
                 .await?;
 
-        match client
-            .call_service::<std_srvs::Trigger>("/not_real", std_srvs::TriggerRequest {})
-            .await
-        {
+        #[cfg(feature = "ros1_test")]
+        let res = client
+            .call_service::<roslibrust_test::ros1::std_srvs::Trigger>(
+                "/not_real",
+                roslibrust_test::ros1::std_srvs::TriggerRequest {},
+            )
+            .await;
+        #[cfg(feature = "ros2_test")]
+        let res = client
+            .call_service::<roslibrust_test::ros2::std_srvs::Trigger>(
+                "/not_real",
+                roslibrust_test::ros2::std_srvs::TriggerRequest {},
+            )
+            .await;
+
+        match res {
             Ok(_) => {
                 panic!("Somehow returned a response on a service that didn't exist?");
             }
@@ -421,18 +522,21 @@ mod integration_tests {
             .await
             .expect("Failed to advertise");
         let subscriber = client
-            .subscribe::<Header>("/test_reconnect")
+            .subscribe::<roslibrust_test::ros1::std_msgs::Header>("/test_reconnect")
             .await
             .expect("Failed to subscribe");
 
         // Confirm we can send and receive messages
         publisher
-            .publish(&Header::default())
+            .publish(&roslibrust_test::ros1::std_msgs::Header::default())
             .await
             .expect("Failed to publish");
 
         let received = subscriber.next().await;
-        assert_eq!(received, Header::default());
+        assert_eq!(
+            received,
+            roslibrust_test::ros1::std_msgs::Header::default()
+        );
 
         // kill rosbridge
         std::mem::drop(bridge);
@@ -440,7 +544,9 @@ mod integration_tests {
         tokio::time::sleep(WAIT_FOR_ROSBRIDGE).await;
 
         // Try to publish and confirm we get an error
-        let res = publisher.publish(&Header::default()).await;
+        let res = publisher
+            .publish(&roslibrust_test::ros1::std_msgs::Header::default())
+            .await;
         match res {
             Ok(_) => {
                 panic!("Should have failed to publish after rosbridge died");
@@ -472,11 +578,14 @@ mod integration_tests {
 
         // Try to publish and confirm we reconnect automatically
         publisher
-            .publish(&Header::default())
+            .publish(&roslibrust_test::ros1::std_msgs::Header::default())
             .await
             .expect("Failed to publish after rosbridge died");
 
         let received = subscriber.next().await;
-        assert_eq!(received, Header::default());
+        assert_eq!(
+            received,
+            roslibrust_test::ros1::std_msgs::Header::default()
+        );
     }
 }

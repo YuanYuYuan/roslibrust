@@ -13,6 +13,10 @@ use roslibrust_common::{Error, RosMessageType, RosServiceType, ServiceFn};
 use std::{collections::HashMap, io, net::Ipv4Addr, sync::Arc};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
+// Type alias to reduce complexity
+type PublisherReply =
+    oneshot::Sender<Result<(broadcast::Sender<Vec<u8>>, mpsc::Sender<()>), String>>;
+
 // Carter TODO:
 // I kinda hate this entire Msg based abstraction internal to the server
 // Why isn't this just a regular async function call?
@@ -41,7 +45,7 @@ pub enum NodeMsg {
     // This results in the node's task ending and the node being dropped.
     Shutdown,
     RegisterPublisher {
-        reply: oneshot::Sender<Result<(broadcast::Sender<Vec<u8>>, mpsc::Sender<()>), String>>,
+        reply: PublisherReply,
         topic: String,
         topic_type: String,
         queue_size: usize,
@@ -175,9 +179,8 @@ impl NodeServerHandle {
             latching,
         })?;
         let received = receiver.await?;
-        Ok(received.map_err(|_err| {
-            NodeError::IoError(io::Error::from(io::ErrorKind::ConnectionAborted))
-        })?)
+        received
+            .map_err(|_err| NodeError::IoError(io::Error::from(io::ErrorKind::ConnectionAborted)))
     }
 
     /// Registers a publisher with the underlying node server
@@ -192,10 +195,9 @@ impl NodeServerHandle {
     ) -> Result<(broadcast::Sender<Vec<u8>>, mpsc::Sender<()>), NodeError> {
         let (sender, receiver) = oneshot::channel();
 
-        let md5sum;
         let md5sum_res =
             roslibrust_common::md5sum::from_message_definition(topic_type, msg_definition);
-        match md5sum_res {
+        let md5sum = match md5sum_res {
             // TODO(lucasw) make a new error type for this?
             Err(err) => {
                 log::error!("{:?}", err);
@@ -203,10 +205,8 @@ impl NodeServerHandle {
                     io::ErrorKind::ConnectionAborted,
                 )));
             }
-            Ok(md5sum_rv) => {
-                md5sum = md5sum_rv;
-            }
-        }
+            Ok(md5sum_rv) => md5sum_rv,
+        };
 
         self.node_server_sender.send(NodeMsg::RegisterPublisher {
             reply: sender,
@@ -218,9 +218,8 @@ impl NodeServerHandle {
             latching,
         })?;
         let received = receiver.await?;
-        Ok(received.map_err(|_err| {
-            NodeError::IoError(io::Error::from(io::ErrorKind::ConnectionAborted))
-        })?)
+        received
+            .map_err(|_err| NodeError::IoError(io::Error::from(io::ErrorKind::ConnectionAborted)))
     }
 
     pub(crate) async fn unregister_publisher(&self, topic: &str) -> Result<(), NodeError> {
@@ -304,10 +303,10 @@ impl NodeServerHandle {
                 md5sum: T::MD5SUM.to_owned(),
             })?;
         let received = receiver.await?;
-        Ok(received.map_err(|err| {
+        received.map_err(|err| {
             log::error!("Failed to register service server: {err}");
             NodeError::IoError(io::Error::from(io::ErrorKind::ConnectionAborted))
-        })?)
+        })
     }
 
     /// Called to remove a service server
@@ -347,10 +346,10 @@ impl NodeServerHandle {
             md5sum: T::MD5SUM.to_owned(),
         })?;
         let received = receiver.await?;
-        Ok(received.map_err(|err| {
+        received.map_err(|err| {
             log::error!("Failed to register subscriber: {err}");
             NodeError::IoError(io::Error::from(io::ErrorKind::ConnectionAborted))
-        })?)
+        })
     }
 
     // This function provides functionality for the Node's XmlRPC server
@@ -370,10 +369,10 @@ impl NodeServerHandle {
             reply: sender,
         })?;
         let received = receiver.await?;
-        Ok(received.map_err(|err| {
+        received.map_err(|err| {
             log::error!("Fail to coordinate channel between publisher and subscriber: {err}");
             NodeError::IoError(io::Error::from(io::ErrorKind::ConnectionAborted))
-        })?)
+        })
     }
 }
 
@@ -411,7 +410,7 @@ pub(crate) struct Node {
 }
 
 impl Node {
-    pub(crate) async fn new(
+    pub(crate) async fn create(
         master_uri: &str,
         hostname: &str,
         node_name: &Name,
@@ -424,7 +423,7 @@ impl Node {
             _node_task: None,
         };
         // Create our xmlrpc server and bind our socket so we know our port and can determine our local URI
-        let xmlrpc_server = XmlRpcServer::new(addr, xml_server_handle)?;
+        let xmlrpc_server = XmlRpcServer::create(addr, xml_server_handle)?;
         let client_uri = format!("http://{hostname}:{}", xmlrpc_server.port());
 
         let rosmaster_client =
@@ -617,11 +616,7 @@ impl Node {
                 protocols,
             } => {
                 // TODO: Should move the actual implementation similar to RegisterPublisher
-                if protocols
-                    .iter()
-                    .find(|proto| proto.as_str() == "TCPROS")
-                    .is_some()
-                {
+                if protocols.iter().any(|proto| proto.as_str() == "TCPROS") {
                     if let Some((_key, publishing_channel)) =
                         self.publishers.iter().find(|(key, _pub)| *key == &topic)
                     {
@@ -663,8 +658,8 @@ impl Node {
             None => {
                 let mut subscription = Subscription::new(
                     &self.node_name,
-                    &topic,
-                    &topic_type,
+                    topic,
+                    topic_type,
                     queue_size,
                     msg_definition.to_owned(),
                     md5sum.to_owned(),
@@ -694,7 +689,7 @@ impl Node {
         // Return handle to existing Publication if it exists
         let existing_entry = {
             self.publishers.iter().find_map(|(key, value)| {
-                if key.as_str() != &topic {
+                if key.as_str() != topic {
                     return None;
                 }
                 if value.topic_type() != topic_type {
@@ -726,19 +721,18 @@ impl Node {
         }
 
         // Otherwise create a new Publication and advertise
-        let (channel, sender, shutdown) = Publication::new(
-            &self.node_name,
+        let config = crate::publisher::PublicationConfig {
+            node_name: &self.node_name,
             latching,
-            &topic,
-            self.host_addr,
+            topic_name: &topic,
+            host_addr: self.host_addr,
             queue_size,
-            &msg_definition,
-            &md5sum,
+            msg_definition: &msg_definition,
+            md5sum: &md5sum,
             topic_type,
-            self.node_handle.clone(),
-        )
-        .await
-        .map_err(|err| {
+            node_handle: self.node_handle.clone(),
+        };
+        let (channel, sender, shutdown) = Publication::new(config).await.map_err(|err| {
             log::error!("Failed to create publishing channel: {err:?}");
             err
         })?;
@@ -849,10 +843,10 @@ impl Node {
             self.client.unregister_service(service_name, uri).await?;
             Ok(())
         } else {
-            return Err(Box::new(std::io::Error::new(
+            Err(Box::new(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "Attempt to unregister service that is not currently registered",
-            )));
+            )))
         }
     }
 
@@ -872,29 +866,26 @@ impl Node {
             debug!("Start shutdown node");
             // Note: we're ignoring all failures here and doing best effort cleanup
             // Many of these log messages will be incorrect until we get our cleanup logic dialed in.
-            for (topic, _subscriptions) in &subscriptions {
+            for topic in subscriptions.keys() {
                 debug!("Node shutdown is cleaning up subscription: {topic}");
-                let _ = client.unregister_subscriber(topic).await.map_err(|e| {
+                let _ = client.unregister_subscriber(topic).await.inspect_err(|_e| {
                     error!("Failed to unregister subscriber for topic: {topic} while shutting down node");
-                    e
                 });
                 debug!("CHECK");
             }
 
-            for (topic, _publication) in &publishers {
+            for topic in publishers.keys() {
                 debug!("Node shutdown is cleaning up publishing: {topic}");
-                let _ = client.unregister_publisher(topic).await.map_err(|e| {
+                let _ = client.unregister_publisher(topic).await.inspect_err(|_e| {
                     error!("Failed to unregister publisher for topic: {topic} while shutting down node.");
-                    e
                 });
             }
 
             for (topic, service_link) in &service_servers {
                 debug!("Node shutdown is cleaning up service: {topic}");
                 let uri = format!("rosrpc://{}:{}", host_addr, service_link.port());
-                let _ = client.unregister_service(topic, uri).await.map_err(|e| {
+                let _ = client.unregister_service(topic, uri).await.inspect_err(|_e| {
                     error!("Failed to unregister server server for topic: {topic} while shutting down node.");
-                    e
                 });
             }
         };

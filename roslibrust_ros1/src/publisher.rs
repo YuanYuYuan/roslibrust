@@ -93,7 +93,7 @@ impl PublisherAny {
     /// See ros1_publish_any.rs example for more details.
     /// Body length should be included as first four bytes.
     // TODO this no longer needs to be (or should be) async
-    pub async fn publish(&self, data: &Vec<u8>) -> Result<(), PublisherError> {
+    pub async fn publish(&self, data: &[u8]) -> Result<(), PublisherError> {
         // TODO this is a pretty dumb...
         // because of the internal channel used for re-direction this future doesn't
         // actually complete when the data is sent, but merely when it is queued to be sent
@@ -118,20 +118,25 @@ pub(crate) struct Publication {
     weak_shutdown_channel: tokio::sync::mpsc::WeakSender<()>,
 }
 
+/// Configuration for creating a new Publication
+pub struct PublicationConfig<'a> {
+    pub node_name: &'a Name,
+    pub latching: bool,
+    pub topic_name: &'a str,
+    pub host_addr: Ipv4Addr,
+    pub queue_size: usize,
+    pub msg_definition: &'a str,
+    pub md5sum: &'a str,
+    pub topic_type: &'a str,
+    pub node_handle: NodeServerHandle,
+}
+
 impl Publication {
     /// Spawns a new publication and sets up all tasks to run it
     /// Returns a handle to the publication and a mpsc::Sender to send messages to be published
-    /// Dropping the Sender will (eventually) result in the publication being dropped and all tasks being canceled
+    /// Dropping the Sender will (eventually) result in publication being dropped and all tasks being canceled
     pub(crate) async fn new(
-        node_name: &Name,
-        latching: bool,
-        topic_name: &str,
-        host_addr: Ipv4Addr,
-        queue_size: usize,
-        msg_definition: &str,
-        md5sum: &str,
-        topic_type: &str,
-        node_handle: NodeServerHandle,
+        config: PublicationConfig<'_>,
     ) -> Result<
         (
             Self,
@@ -141,21 +146,21 @@ impl Publication {
         std::io::Error,
     > {
         // Get a socket for receiving connections on
-        let host_addr = SocketAddr::from((host_addr, 0));
+        let host_addr = SocketAddr::from((config.host_addr, 0));
         let tcp_listener = tokio::net::TcpListener::bind(host_addr).await?;
         let listener_port = tcp_listener.local_addr().unwrap().port();
 
-        // Setup the channel will will receive messages to be published on
-        let (sender, receiver) = broadcast::channel::<Vec<u8>>(queue_size);
+        // Setup channel will will receive messages to be published on
+        let (sender, receiver) = broadcast::channel::<Vec<u8>>(config.queue_size);
 
-        // Setup the ROS connection header that we'll respond to all incoming connections with
+        // Setup ROS connection header that we'll respond to all incoming connections with
         let responding_conn_header = ConnectionHeader {
-            caller_id: node_name.to_string(),
-            latching,
-            msg_definition: msg_definition.to_owned(),
-            md5sum: Some(md5sum.to_owned()),
-            topic: Some(topic_name.to_owned()),
-            topic_type: topic_type.to_owned(),
+            caller_id: config.node_name.to_string(),
+            latching: config.latching,
+            msg_definition: config.msg_definition.to_owned(),
+            md5sum: Some(config.md5sum.to_owned()),
+            topic: Some(config.topic_name.to_owned()),
+            topic_type: config.topic_type.to_owned(),
             tcp_nodelay: false,
             service: None,
             persistent: None,
@@ -167,7 +172,7 @@ impl Publication {
         let weak_shutdown_channel = shutdown_tx.downgrade();
 
         // Create the task that will accept new TCP connections
-        let topic_name_copy = topic_name.to_owned();
+        let topic_name_copy = config.topic_name.to_owned();
         let tcp_accept_handle = tokio::spawn(async move {
             Self::tcp_accept_task(
                 tcp_listener,
@@ -175,7 +180,7 @@ impl Publication {
                 responding_conn_header,
                 receiver,
                 shutdown_rx,
-                node_handle,
+                config.node_handle,
             )
             .await
         });
@@ -183,7 +188,7 @@ impl Publication {
         let sender_copy = sender.clone();
         Ok((
             Self {
-                topic_type: topic_type.to_owned(),
+                topic_type: config.topic_type.to_owned(),
                 _tcp_accept_task: tcp_accept_handle.into(),
                 listener_port,
                 publish_sender: sender,

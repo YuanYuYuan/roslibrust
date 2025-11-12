@@ -46,6 +46,9 @@ type TypeErasedCallback = Arc<
 // Internal type for storing services
 type ServiceStore = RwLock<BTreeMap<String, TypeErasedCallback>>;
 
+// Type alias to reduce complexity
+type TopicMap = BTreeMap<String, (Channel::Sender<Vec<u8>>, Channel::Receiver<Vec<u8>>)>;
+
 /// A mock ROS implementation that can be substituted for any roslibrust backend in unit tests.
 ///
 /// Implements [TopicProvider] and [ServiceProvider] to provide basic ros functionality.
@@ -53,8 +56,14 @@ type ServiceStore = RwLock<BTreeMap<String, TypeErasedCallback>>;
 pub struct MockRos {
     // We could probably achieve some fancier type erasure than actually serializing the data
     // but this ends up being pretty simple
-    topics: Arc<RwLock<BTreeMap<String, (Channel::Sender<Vec<u8>>, Channel::Receiver<Vec<u8>>)>>>,
+    topics: Arc<RwLock<TopicMap>>,
     services: Arc<ServiceStore>,
+}
+
+impl Default for MockRos {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MockRos {
@@ -334,7 +343,7 @@ mod tests {
         let request = std_srvs::SetBoolRequest { data: true };
 
         let response = client.call(&request).await.unwrap();
-        assert_eq!(response.success, true);
+        assert!(response.success);
         assert_eq!(response.message, "You set my bool!");
     }
 
@@ -398,7 +407,7 @@ mod tests {
         // should work now
         let request = std_srvs::SetBoolRequest { data: true };
         let response = client.call(&request).await.unwrap();
-        assert_eq!(response.success, true);
+        assert!(response.success);
         assert_eq!(response.message, "You set my bool!");
     }
 
@@ -434,7 +443,7 @@ mod tests {
         // Prior to introducing a yield_now() in ServiceClient::call() this would fail consistently
         let request = std_srvs::SetBoolRequest { data: true };
         let response = client.call(&request).await.unwrap();
-        assert_eq!(response.success, true);
+        assert!(response.success);
         assert_eq!(response.message, "You set my bool!");
     }
 }
