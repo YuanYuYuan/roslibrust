@@ -317,6 +317,10 @@ impl ServiceFile {
         self.md5sum.clone()
     }
 
+    pub fn get_ros2_hash(&self) -> &Ros2Hash {
+        &self.ros2_hash
+    }
+
     fn compute_md5sum(
         parsed: &ParsedServiceFile,
         graph: &BTreeMap<String, MessageFile>,
@@ -786,7 +790,7 @@ pub(crate) fn parse_ros_files(
 > {
     let mut parsed_messages = Vec::new();
     let mut parsed_services = Vec::new();
-    let mut parsed_actions = Vec::new();
+    let parsed_actions = Vec::new();
     for (pkg, path) in msg_paths {
         let contents = std::fs::read_to_string(&path).map_err(|e| {
             Error::with(
@@ -811,18 +815,27 @@ pub(crate) fn parse_ros_files(
             }
             "msg" => {
                 let msg = parse_ros_message_file(&contents, name, &pkg, &path)?;
-                parsed_messages.push(msg);
+                // Filter out messages containing wstring fields (not widely used, requires UTF-16 serialization)
+                let has_wstring = msg
+                    .fields
+                    .iter()
+                    .any(|field| field.field_type.field_type == "wstring");
+                if has_wstring {
+                    log::debug!(
+                        "Skipping message with wstring field (not supported): {}/{}",
+                        pkg.name,
+                        name
+                    );
+                } else {
+                    parsed_messages.push(msg);
+                }
             }
             "action" => {
-                let action = parse_ros_action_file(&contents, name, &pkg, &path)?;
-                parsed_actions.push(action.clone());
-                parsed_messages.push(action.action_type);
-                parsed_messages.push(action.action_goal_type);
-                parsed_messages.push(action.goal_type);
-                parsed_messages.push(action.action_result_type);
-                parsed_messages.push(action.result_type);
-                parsed_messages.push(action.action_feedback_type);
-                parsed_messages.push(action.feedback_type);
+                // Skip action files for now - ROS2 actions work differently and don't use
+                // the ROS1-style actionlib_msgs wrapper messages. Generating these causes
+                // dependency resolution failures when actionlib_msgs is not available.
+                // TODO: Implement proper ROS2 action support without actionlib_msgs dependency
+                log::debug!("Skipping action file (not yet supported): {path:?}");
             }
             _ => {
                 log::error!("File extension not recognized as a ROS file: {path:?}");

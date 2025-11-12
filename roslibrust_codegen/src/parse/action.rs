@@ -21,6 +21,10 @@ pub struct ParsedActionFile {
     pub path: PathBuf,
 }
 
+// Action file parsing is currently disabled as ROS2 actions work differently
+// and don't use actionlib_msgs. These functions may be needed in the future
+// for proper ROS2 action support.
+#[allow(dead_code)]
 pub fn parse_ros_action_file(
     data: &str,
     name: &str,
@@ -112,6 +116,7 @@ pub fn parse_ros_action_file(
     }
 }
 
+#[allow(dead_code)]
 fn generate_action_msg(
     name: &str,
     package: &Package,
@@ -128,6 +133,7 @@ fn generate_action_msg(
     parse_ros_message_file(&source, format!("{name}Action").as_str(), package, path)
 }
 
+#[allow(dead_code)]
 fn generate_action_goal_msg(
     name: &str,
     package: &Package,
@@ -144,6 +150,7 @@ actionlib_msgs/GoalID goal_id
     parse_ros_message_file(&source, format!("{name}ActionGoal").as_str(), package, path)
 }
 
+#[allow(dead_code)]
 fn generate_action_result_msg(
     name: &str,
     package: &Package,
@@ -165,6 +172,7 @@ actionlib_msgs/GoalStatus status
     )
 }
 
+#[allow(dead_code)]
 fn generate_action_feedback_msg(
     name: &str,
     package: &Package,

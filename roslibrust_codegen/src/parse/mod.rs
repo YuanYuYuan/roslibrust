@@ -4,7 +4,7 @@ use crate::{ConstantInfo, FieldInfo, FieldType};
 use std::collections::HashMap;
 
 mod action;
-pub use action::{parse_ros_action_file, ParsedActionFile};
+pub use action::ParsedActionFile;
 mod msg;
 pub use msg::{parse_ros_message_file, ParsedMessageFile};
 mod srv;
@@ -54,7 +54,8 @@ lazy_static::lazy_static! {
         ("string", "::std::string::String"),
         ("builtin_interfaces/Time", "::roslibrust::codegen::integral_types::Time"),
         ("builtin_interfaces/Duration", "::roslibrust::codegen::integral_types::Duration"),
-        // ("wstring", TODO),
+        // Note: wstring is intentionally not supported - it requires UTF-16 serialization
+        // which is not widely used in ROS2. Messages containing wstring are filtered out.
     ].into_iter().collect();
 }
 
